@@ -19,6 +19,7 @@ import (
 	"fmt"
 	"net"
 	"os"
+	"syscall"
 	"time"
 
 	"github.com/aws/amazon-vpc-cni-k8s/pkg/sgpp"
@@ -361,25 +362,29 @@ func (n *linuxNetwork) SetupBranchENIPodNetwork(vethMetadata VirtualInterfaceMet
 	return nil
 }
 
-// TeardownBranchENIPodNetwork tears down the vlan and corresponding ip rules.
+// TeardownBranchENIPodNetwork tears down the per-pod rules/routes and conditionally removes the vlan link
+// if no other pods are still using it.
 func (n *linuxNetwork) TeardownBranchENIPodNetwork(vethMetadata VirtualInterfaceMetadata, vlanID int, _ sgpp.EnforcingMode, log logger.Logger) error {
 	log.Debugf("TeardownBranchENIPodNetwork: containerAddr=%s, vlanID=%d", vethMetadata.IPAddress.String(), vlanID)
-
-	if err := n.teardownVlan(vlanID, log); err != nil {
-		return errors.Wrapf(err, "TeardownBranchENIPodNetwork: failed to teardown vlan")
-	}
 
 	ipFamily := unix.AF_INET
 	if !networkutils.IsIPv4(vethMetadata.IPAddress.IP) {
 		ipFamily = unix.AF_INET6
 	}
-	// to handle the migration between different enforcingMode, we try to clean up rules under both mode since the pod might be setup with a different mode.
+
+	// Teardown per-pod rules and routes first (scoped to this pod only).
+	// We clean up under both enforcing modes to handle migration between modes.
 	rtTable := vlanID + 100
-	if err := n.teardownIIFBasedContainerRouteRules(rtTable, ipFamily, log); err != nil {
+	if err := n.teardownIIFBasedContainerRouteRules(vethMetadata, rtTable, ipFamily, log); err != nil {
 		return errors.Wrapf(err, "TeardownBranchENIPodNetwork: unable to teardown IIF based container routes and rules")
 	}
 	if err := n.teardownIPBasedContainerRouteRules(vethMetadata.IPAddress, rtTable, log); err != nil {
 		return errors.Wrapf(err, "TeardownBranchENIPodNetwork: unable to teardown IP based container routes and rules")
+	}
+
+	// Only delete the vlan link if no other pods are still using it.
+	if err := n.teardownVlanIfUnused(vlanID, rtTable, ipFamily, log); err != nil {
+		return errors.Wrapf(err, "TeardownBranchENIPodNetwork: failed to teardown vlan")
 	}
 
 	return nil
@@ -447,24 +452,55 @@ func (n *linuxNetwork) setupVeth(hostVethName string, contVethName string, netns
 // setupVlan sets up the vlan interface for branchENI, and configures default routes in specified route table
 func (n *linuxNetwork) setupVlan(vlanID int, eniMAC string, subnetGW string, parentIfIndex int, rtTable int, log logger.Logger) (netlink.Link, error) {
 	vlanLinkName := buildVlanLinkName(vlanID)
-	// 1. clean up if vlan already exists (necessary when trunk ENI changes).
-	if oldVlan, err := n.netLink.LinkByName(vlanLinkName); err == nil {
-		if err := n.netLink.LinkDel(oldVlan); err != nil {
+
+	// If the vlan link already exists with the correct config, reuse it.
+	// Multiple pods may share the same branch ENI (and VLAN) when prefix delegation is enabled.
+	if existingVlan, err := n.netLink.LinkByName(vlanLinkName); err == nil {
+		expectedMAC, _ := net.ParseMAC(eniMAC)
+		if existingVlan.Attrs().ParentIndex == parentIfIndex &&
+			existingVlan.Attrs().HardwareAddr.String() == expectedMAC.String() {
+			log.Debugf("Reusing existing vlan link: %s (index=%d)", vlanLinkName, existingVlan.Attrs().Index)
+			if err := n.netLink.LinkSetUp(existingVlan); err != nil {
+				return nil, errors.Wrapf(err, "failed to ensure vlan link %s is up", vlanLinkName)
+			}
+			routes := buildRoutesForVlan(rtTable, existingVlan.Attrs().Index, net.ParseIP(subnetGW))
+			for _, r := range routes {
+				if err := n.netLink.RouteReplace(&r); err != nil {
+					return nil, errors.Wrapf(err, "failed to replace route entry %s via %s", r.Dst.IP.String(), subnetGW)
+				}
+			}
+			return existingVlan, nil
+		}
+		// Config mismatch (e.g. trunk ENI changed) — delete and recreate
+		if err := n.netLink.LinkDel(existingVlan); err != nil {
 			return nil, errors.Wrapf(err, "failed to delete old vlan link %s", vlanLinkName)
 		}
-		log.Debugf("Successfully deleted old vlan link: %s", vlanLinkName)
+		log.Debugf("Deleted old vlan link with mismatched config: %s", vlanLinkName)
 	}
 
-	// 2. add new vlan link
+	// Create new vlan link
 	vlanLink := buildVlanLink(vlanLinkName, vlanID, parentIfIndex, eniMAC)
 	if err := n.netLink.LinkAdd(vlanLink); err != nil {
+		if os.IsExist(err) {
+			// Another CNI invocation created it concurrently — reuse it
+			if existingVlan, lookupErr := n.netLink.LinkByName(vlanLinkName); lookupErr == nil {
+				log.Debugf("Reusing concurrently created vlan link: %s (index=%d)", vlanLinkName, existingVlan.Attrs().Index)
+				if err := n.netLink.LinkSetUp(existingVlan); err != nil {
+					return nil, errors.Wrapf(err, "failed to ensure vlan link %s is up", vlanLinkName)
+				}
+				routes := buildRoutesForVlan(rtTable, existingVlan.Attrs().Index, net.ParseIP(subnetGW))
+				for _, r := range routes {
+					if err := n.netLink.RouteReplace(&r); err != nil {
+						return nil, errors.Wrapf(err, "failed to replace route entry %s via %s", r.Dst.IP.String(), subnetGW)
+					}
+				}
+				return existingVlan, nil
+			}
+		}
 		return nil, errors.Wrapf(err, "failed to add vlan link %s", vlanLinkName)
 	}
 
-	// 3. Set IPv6 sysctls
-	//    accept_ra=0
-	//    accept_redirects=1
-	//    forwarding=0
+	// Set IPv6 sysctls
 	if err := n.procSys.Set(fmt.Sprintf("net/ipv6/conf/%s/accept_ra", vlanLinkName), "0"); err != nil {
 		if !os.IsNotExist(err) {
 			return nil, errors.Wrapf(err, "failed to disable IPv6 router advertisements")
@@ -486,12 +522,12 @@ func (n *linuxNetwork) setupVlan(vlanID int, eniMAC string, subnetGW string, par
 		log.Debugf("Ignoring '%v' writing to forwarding: Assuming kernel lacks IPv6 support", err)
 	}
 
-	// 4. bring up the vlan
+	// Bring up the vlan
 	if err := n.netLink.LinkSetUp(vlanLink); err != nil {
 		return nil, errors.Wrapf(err, "failed to setUp vlan link %s", vlanLinkName)
 	}
 
-	// 5. create default routes for vlan
+	// Create default routes for vlan
 	routes := buildRoutesForVlan(rtTable, vlanLink.Index, net.ParseIP(subnetGW))
 	for _, r := range routes {
 		if err := n.netLink.RouteReplace(&r); err != nil {
@@ -505,11 +541,36 @@ func (n *linuxNetwork) teardownVlan(vlanID int, log logger.Logger) error {
 	vlanLinkName := buildVlanLinkName(vlanID)
 	if vlan, err := n.netLink.LinkByName(vlanLinkName); err == nil {
 		if err := n.netLink.LinkDel(vlan); err != nil {
+			if errors.Is(err, syscall.ENODEV) || errors.Is(err, syscall.ENXIO) {
+				log.Debugf("Vlan link %s already gone, ignoring", vlanLinkName)
+				return nil
+			}
 			return errors.Wrapf(err, "failed to delete vlan link %s", vlanLinkName)
 		}
 		log.Debugf("Successfully deleted vlan link %s", vlanLinkName)
 	}
 	return nil
+}
+
+// teardownVlanIfUnused deletes the vlan link only if no other pods still have IIF rules
+// referencing its routing table. This supports prefix delegation where multiple pods
+// share a single branch ENI and VLAN.
+func (n *linuxNetwork) teardownVlanIfUnused(vlanID int, rtTable int, family int, log logger.Logger) error {
+	vlanLinkName := buildVlanLinkName(vlanID)
+	rules, err := n.netLink.RuleList(family)
+	if err != nil {
+		return errors.Wrapf(err, "failed to list rules for family %d", family)
+	}
+	for _, r := range rules {
+		if r.Priority == networkutils.VlanRulePriority && r.Table == rtTable {
+			if r.IifName == vlanLinkName {
+				continue
+			}
+			log.Debugf("Vlan %d still in use (rule IIF=%s), skipping deletion", vlanID, r.IifName)
+			return nil
+		}
+	}
+	return n.teardownVlan(vlanID, log)
 }
 
 // setupIPBasedContainerRouteRules setups the routes and route rules for containers based on IP.
@@ -638,16 +699,31 @@ func (n *linuxNetwork) setupIIFBasedContainerRouteRules(hostVeth netlink.Link, c
 	return nil
 }
 
-func (n *linuxNetwork) teardownIIFBasedContainerRouteRules(rtTable int, family int, log logger.Logger) error {
-	rule := n.netLink.NewRule()
-	rule.Priority = networkutils.VlanRulePriority
-	rule.Table = rtTable
-	rule.Family = family
+func (n *linuxNetwork) teardownIIFBasedContainerRouteRules(vethMetadata VirtualInterfaceMetadata, rtTable int, family int, log logger.Logger) error {
+	// Only delete this pod's hostVeth IIF rule, not the shared vlan IIF rule.
+	// The vlan IIF rule is cleaned up when the vlan link is deleted.
+	hostVethRule := n.netLink.NewRule()
+	hostVethRule.IifName = vethMetadata.HostVethName
+	hostVethRule.Priority = networkutils.VlanRulePriority
+	hostVethRule.Table = rtTable
+	hostVethRule.Family = family
 
-	if err := networkutils.NetLinkRuleDelAll(n.netLink, rule); err != nil {
-		return errors.Wrapf(err, "failed to delete IIF based rules, rtTable=%v", rtTable)
+	if err := networkutils.NetLinkRuleDelAll(n.netLink, hostVethRule); err != nil {
+		return errors.Wrapf(err, "failed to delete hostVeth IIF rule, hostVeth=%s, rtTable=%v", vethMetadata.HostVethName, rtTable)
 	}
-	log.Debugf("Successfully deleted IIF based rules, rtTable=%v", rtTable)
+	log.Debugf("Successfully deleted hostVeth IIF rule, hostVeth=%s, rtTable=%v", vethMetadata.HostVethName, rtTable)
+
+	// Delete per-pod route in the vlan routing table
+	route := netlink.Route{
+		Scope: netlink.SCOPE_LINK,
+		Dst:   vethMetadata.IPAddress,
+		Table: rtTable,
+	}
+	if err := n.netLink.RouteDel(&route); err != nil && !netlinkwrapper.IsNotExistsError(err) {
+		log.Warnf("failed to delete container route in rtTable %d: %v", rtTable, err)
+	} else {
+		log.Debugf("Successfully deleted container route, containerAddr=%s, rtTable=%v", vethMetadata.IPAddress.String(), rtTable)
+	}
 
 	return nil
 }

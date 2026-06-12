@@ -1619,392 +1619,6 @@ func Test_linuxNetwork_SetupBranchENIPodNetwork(t *testing.T) {
 	}
 }
 
-func Test_linuxNetwork_TeardownBranchENIPodNetwork(t *testing.T) {
-	vlanID := 7
-	containerAddr := &net.IPNet{
-		IP:   net.ParseIP("192.168.100.42"),
-		Mask: net.CIDRMask(32, 32),
-	}
-	containerV6Addr := &net.IPNet{
-		IP:   net.ParseIP("2600::2"),
-		Mask: net.CIDRMask(128, 128),
-	}
-
-	vlanRuleForRTTable107 := netlink.NewRule()
-	vlanRuleForRTTable107.Priority = networkutils.VlanRulePriority
-	vlanRuleForRTTable107.Table = 107
-	vlanRuleForRTTable107.Family = netlink.FAMILY_V4
-
-	vlanV6RuleForRTTable107 := netlink.NewRule()
-	vlanV6RuleForRTTable107.Priority = networkutils.VlanRulePriority
-	vlanV6RuleForRTTable107.Table = 107
-	vlanV6RuleForRTTable107.Family = netlink.FAMILY_V6
-
-	toContainerRoute := &netlink.Route{
-		Scope: netlink.SCOPE_LINK,
-		Dst:   containerAddr,
-		Table: unix.RT_TABLE_MAIN,
-	}
-	toContainerV6Route := &netlink.Route{
-		Scope: netlink.SCOPE_LINK,
-		Dst:   containerV6Addr,
-		Table: unix.RT_TABLE_MAIN,
-	}
-
-	toContainerRule := netlink.NewRule()
-	toContainerRule.Dst = containerAddr
-	toContainerRule.Priority = networkutils.ToContainerRulePriority
-	toContainerRule.Table = unix.RT_TABLE_MAIN
-
-	toContainerV6Rule := netlink.NewRule()
-	toContainerV6Rule.Dst = containerV6Addr
-	toContainerV6Rule.Priority = networkutils.ToContainerRulePriority
-	toContainerV6Rule.Table = unix.RT_TABLE_MAIN
-
-	fromContainerRule := netlink.NewRule()
-	fromContainerRule.Src = containerAddr
-	fromContainerRule.Priority = networkutils.FromPodRulePriority
-	fromContainerRule.Table = 107
-
-	fromContainerV6Rule := netlink.NewRule()
-	fromContainerV6Rule.Src = containerV6Addr
-	fromContainerV6Rule.Priority = networkutils.FromPodRulePriority
-	fromContainerV6Rule.Table = 107
-
-	type linkByNameCall struct {
-		linkName string
-		link     netlink.Link
-		err      error
-	}
-	type linkDelCall struct {
-		link netlink.Link
-		err  error
-	}
-	type routeDelCall struct {
-		route *netlink.Route
-		err   error
-	}
-	type ruleDelCall struct {
-		rule *netlink.Rule
-		err  error
-	}
-
-	type fields struct {
-		linkByNameCalls []linkByNameCall
-		linkDelCalls    []linkDelCall
-		routeDelCalls   []routeDelCall
-		ruleDelCalls    []ruleDelCall
-	}
-	type args struct {
-		containerAddr      *net.IPNet
-		vlanID             int
-		podSGEnforcingMode sgpp.EnforcingMode
-	}
-	tests := []struct {
-		name    string
-		fields  fields
-		args    args
-		wantErr error
-	}{
-		{
-			name: "successfully teardown pod network - pod was setup under strict mode",
-			fields: fields{
-				linkByNameCalls: []linkByNameCall{
-					{
-						linkName: "vlan.eth.7",
-						link:     &netlink.Vlan{VlanId: vlanID},
-					},
-				},
-				linkDelCalls: []linkDelCall{
-					{
-						link: &netlink.Vlan{VlanId: vlanID},
-					},
-				},
-				routeDelCalls: []routeDelCall{
-					{
-						route: toContainerRoute,
-						err:   syscall.ESRCH,
-					},
-				},
-				ruleDelCalls: []ruleDelCall{
-					{
-						rule: vlanRuleForRTTable107,
-					},
-					{
-						rule: vlanRuleForRTTable107,
-					},
-					{
-						rule: vlanRuleForRTTable107,
-						err:  syscall.ENOENT,
-					},
-					{
-						rule: toContainerRule,
-						err:  syscall.ENOENT,
-					},
-					{
-						rule: fromContainerRule,
-						err:  syscall.ENOENT,
-					},
-				},
-			},
-			args: args{
-				containerAddr:      containerAddr,
-				vlanID:             vlanID,
-				podSGEnforcingMode: sgpp.EnforcingModeStrict,
-			},
-		},
-		{
-			name: "successfully teardown v6 pod network - pod was setup under strict mode",
-			fields: fields{
-				linkByNameCalls: []linkByNameCall{
-					{
-						linkName: "vlan.eth.7",
-						link:     &netlink.Vlan{VlanId: vlanID},
-					},
-				},
-				linkDelCalls: []linkDelCall{
-					{
-						link: &netlink.Vlan{VlanId: vlanID},
-					},
-				},
-				routeDelCalls: []routeDelCall{
-					{
-						route: toContainerV6Route,
-						err:   syscall.ESRCH,
-					},
-				},
-				ruleDelCalls: []ruleDelCall{
-					{
-						rule: vlanV6RuleForRTTable107,
-					},
-					{
-						rule: vlanV6RuleForRTTable107,
-					},
-					{
-						rule: vlanV6RuleForRTTable107,
-						err:  syscall.ENOENT,
-					},
-					{
-						rule: toContainerV6Rule,
-						err:  syscall.ENOENT,
-					},
-					{
-						rule: fromContainerV6Rule,
-						err:  syscall.ENOENT,
-					},
-				},
-			},
-			args: args{
-				containerAddr:      containerV6Addr,
-				vlanID:             vlanID,
-				podSGEnforcingMode: sgpp.EnforcingModeStrict,
-			},
-		},
-		{
-			name: "successfully teardown pod network - pod was setup under standard mode",
-			fields: fields{
-				linkByNameCalls: []linkByNameCall{
-					{
-						linkName: "vlan.eth.7",
-						link:     &netlink.Vlan{VlanId: vlanID},
-					},
-				},
-				linkDelCalls: []linkDelCall{
-					{
-						link: &netlink.Vlan{VlanId: vlanID},
-					},
-				},
-				routeDelCalls: []routeDelCall{
-					{
-						route: toContainerRoute,
-					},
-				},
-				ruleDelCalls: []ruleDelCall{
-					{
-						rule: vlanRuleForRTTable107,
-						err:  syscall.ENOENT,
-					},
-					{
-						rule: toContainerRule,
-					},
-					{
-						rule: fromContainerRule,
-					},
-					{
-						rule: fromContainerRule,
-						err:  syscall.ENOENT,
-					},
-				},
-			},
-			args: args{
-				containerAddr:      containerAddr,
-				vlanID:             vlanID,
-				podSGEnforcingMode: sgpp.EnforcingModeStandard,
-			},
-		},
-		{
-			name: "successfully teardown v6 pod network - pod was setup under standard mode",
-			fields: fields{
-				linkByNameCalls: []linkByNameCall{
-					{
-						linkName: "vlan.eth.7",
-						link:     &netlink.Vlan{VlanId: vlanID},
-					},
-				},
-				linkDelCalls: []linkDelCall{
-					{
-						link: &netlink.Vlan{VlanId: vlanID},
-					},
-				},
-				routeDelCalls: []routeDelCall{
-					{
-						route: toContainerV6Route,
-					},
-				},
-				ruleDelCalls: []ruleDelCall{
-					{
-						rule: vlanV6RuleForRTTable107,
-						err:  syscall.ENOENT,
-					},
-					{
-						rule: toContainerV6Rule,
-					},
-					{
-						rule: fromContainerV6Rule,
-					},
-					{
-						rule: fromContainerV6Rule,
-						err:  syscall.ENOENT,
-					},
-				},
-			},
-			args: args{
-				containerAddr:      containerV6Addr,
-				vlanID:             vlanID,
-				podSGEnforcingMode: sgpp.EnforcingModeStandard,
-			},
-		},
-		{
-			name: "failed to teardown vlan",
-			fields: fields{
-				linkByNameCalls: []linkByNameCall{
-					{
-						linkName: "vlan.eth.7",
-						link:     &netlink.Vlan{VlanId: vlanID},
-					},
-				},
-				linkDelCalls: []linkDelCall{
-					{
-						link: &netlink.Vlan{VlanId: vlanID},
-						err:  errors.New("some error"),
-					},
-				},
-			},
-			args: args{
-				containerAddr:      containerAddr,
-				vlanID:             vlanID,
-				podSGEnforcingMode: sgpp.EnforcingModeStandard,
-			},
-			wantErr: errors.New("TeardownBranchENIPodNetwork: failed to teardown vlan: failed to delete vlan link vlan.eth.7: some error"),
-		},
-		{
-			name: "failed to delete vlan rule",
-			fields: fields{
-				linkByNameCalls: []linkByNameCall{
-					{
-						linkName: "vlan.eth.7",
-						link:     &netlink.Vlan{VlanId: vlanID},
-					},
-				},
-				linkDelCalls: []linkDelCall{
-					{
-						link: &netlink.Vlan{VlanId: vlanID},
-					},
-				},
-				ruleDelCalls: []ruleDelCall{
-					{
-						rule: vlanRuleForRTTable107,
-						err:  errors.New("some error"),
-					},
-				},
-			},
-			args: args{
-				containerAddr:      containerAddr,
-				vlanID:             vlanID,
-				podSGEnforcingMode: sgpp.EnforcingModeStrict,
-			},
-			wantErr: errors.New("TeardownBranchENIPodNetwork: unable to teardown IIF based container routes and rules: failed to delete IIF based rules, rtTable=107: some error"),
-		},
-		{
-			name: "failed to delete toContainer rule",
-			fields: fields{
-				linkByNameCalls: []linkByNameCall{
-					{
-						linkName: "vlan.eth.7",
-						link:     &netlink.Vlan{VlanId: vlanID},
-					},
-				},
-				linkDelCalls: []linkDelCall{
-					{
-						link: &netlink.Vlan{VlanId: vlanID},
-					},
-				},
-				ruleDelCalls: []ruleDelCall{
-					{
-						rule: vlanRuleForRTTable107,
-						err:  syscall.ENOENT,
-					},
-					{
-						rule: toContainerRule,
-						err:  errors.New("some error"),
-					},
-				},
-			},
-			args: args{
-				containerAddr:      containerAddr,
-				vlanID:             vlanID,
-				podSGEnforcingMode: sgpp.EnforcingModeStandard,
-			},
-			wantErr: errors.New("TeardownBranchENIPodNetwork: unable to teardown IP based container routes and rules: failed to delete toContainer rule, containerAddr=192.168.100.42/32, rtTable=main: some error"),
-		},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			ctrl := gomock.NewController(t)
-			defer ctrl.Finish()
-
-			netLink := mock_netlinkwrapper.NewMockNetLink(ctrl)
-			netLink.EXPECT().NewRule().DoAndReturn(func() *netlink.Rule { return netlink.NewRule() }).AnyTimes()
-			for _, call := range tt.fields.linkByNameCalls {
-				netLink.EXPECT().LinkByName(call.linkName).Return(call.link, call.err)
-			}
-			for _, call := range tt.fields.linkDelCalls {
-				netLink.EXPECT().LinkDel(call.link).Return(call.err)
-			}
-			for _, call := range tt.fields.routeDelCalls {
-				netLink.EXPECT().RouteDel(call.route).Return(call.err)
-			}
-			for _, call := range tt.fields.ruleDelCalls {
-				netLink.EXPECT().RuleDel(call.rule).Return(call.err)
-			}
-			n := &linuxNetwork{
-				netLink: netLink,
-			}
-
-			vIfMetadata := VirtualInterfaceMetadata{
-				IPAddress: tt.args.containerAddr,
-			}
-
-			err := n.TeardownBranchENIPodNetwork(vIfMetadata, tt.args.vlanID, tt.args.podSGEnforcingMode, testLogger)
-			if tt.wantErr != nil {
-				assert.EqualError(t, err, tt.wantErr.Error())
-			} else {
-				assert.NoError(t, err)
-			}
-		})
-	}
-}
-
 func Test_createVethPairContext_run(t *testing.T) {
 	contVethWithIndex1 := &netlink.Veth{
 		LinkAttrs: netlink.LinkAttrs{
@@ -3948,394 +3562,6 @@ func Test_linuxNetwork_setupVeth(t *testing.T) {
 	}
 }
 
-func Test_linuxNetwork_setupVlan(t *testing.T) {
-	vlanID := 7
-	parentIfIndex := 3
-	eniMac := "01:23:45:67:89:ab"
-
-	vlanLinkPostAddWithIndex9 := buildVlanLink("vlan.eth.7", vlanID, parentIfIndex, eniMac)
-	vlanLinkPostAddWithIndex9.Index = 9
-	type linkByNameCall struct {
-		linkName string
-		link     netlink.Link
-		err      error
-	}
-	type linkAddCall struct {
-		link      netlink.Link
-		linkIndex int
-		err       error
-	}
-	type linkDelCall struct {
-		link netlink.Link
-		err  error
-	}
-	type linkSetupCall struct {
-		link netlink.Link
-		err  error
-	}
-	type routeReplaceCall struct {
-		route *netlink.Route
-		err   error
-	}
-	type procSysSetCall struct {
-		key   string
-		value string
-		err   error
-	}
-
-	type fields struct {
-		linkByNameCalls   []linkByNameCall
-		linkAddCalls      []linkAddCall
-		linkDelCalls      []linkDelCall
-		linkSetupCalls    []linkSetupCall
-		routeReplaceCalls []routeReplaceCall
-		procSysSetCalls   []procSysSetCall
-	}
-
-	type args struct {
-		vlanID        int
-		eniMAC        string
-		subnetGW      string
-		parentIfIndex int
-		rtTable       int
-	}
-	tests := []struct {
-		name    string
-		fields  fields
-		args    args
-		want    netlink.Link
-		wantErr error
-	}{
-		{
-			name: "successfully setup vlan - old vlan don't exists",
-			fields: fields{
-				linkByNameCalls: []linkByNameCall{
-					{
-						linkName: "vlan.eth.7",
-						err:      errors.Errorf("don't exists"),
-					},
-				},
-				linkAddCalls: []linkAddCall{
-					{
-						link:      buildVlanLink("vlan.eth.7", vlanID, parentIfIndex, eniMac),
-						linkIndex: 9,
-					},
-				},
-				linkSetupCalls: []linkSetupCall{
-					{
-						link: vlanLinkPostAddWithIndex9,
-					},
-				},
-				routeReplaceCalls: []routeReplaceCall{
-					{
-						route: &netlink.Route{
-							LinkIndex: 9,
-							Dst:       &net.IPNet{IP: net.ParseIP("192.168.120.1"), Mask: net.CIDRMask(32, 32)},
-							Scope:     netlink.SCOPE_LINK,
-							Table:     107,
-						},
-					},
-					{
-						route: &netlink.Route{
-							LinkIndex: 9,
-							Dst:       &net.IPNet{IP: net.IPv4zero, Mask: net.CIDRMask(0, 32)},
-							Scope:     netlink.SCOPE_UNIVERSE,
-							Gw:        net.ParseIP("192.168.120.1"),
-							Table:     107,
-						},
-					},
-				},
-				procSysSetCalls: []procSysSetCall{
-					{
-						key:   "net/ipv6/conf/vlan.eth.7/accept_ra",
-						value: "0",
-					},
-					{
-						key:   "net/ipv6/conf/vlan.eth.7/accept_redirects",
-						value: "1",
-					},
-					{
-						key:   "net/ipv6/conf/vlan.eth.7/forwarding",
-						value: "0",
-					},
-				},
-			},
-			args: args{
-				vlanID:        vlanID,
-				eniMAC:        eniMac,
-				subnetGW:      "192.168.120.1",
-				parentIfIndex: parentIfIndex,
-				rtTable:       107,
-			},
-			want: vlanLinkPostAddWithIndex9,
-		},
-		{
-			name: "successfully setup vlan - old vlan exists",
-			fields: fields{
-				linkByNameCalls: []linkByNameCall{
-					{
-						linkName: "vlan.eth.7",
-						link:     buildVlanLink("vlan.eth.7", vlanID, parentIfIndex, eniMac),
-					},
-				},
-				linkDelCalls: []linkDelCall{
-					{
-						link: buildVlanLink("vlan.eth.7", vlanID, parentIfIndex, eniMac),
-					},
-				},
-				linkAddCalls: []linkAddCall{
-					{
-						link:      buildVlanLink("vlan.eth.7", vlanID, parentIfIndex, eniMac),
-						linkIndex: 9,
-					},
-				},
-				linkSetupCalls: []linkSetupCall{
-					{
-						link: vlanLinkPostAddWithIndex9,
-					},
-				},
-				routeReplaceCalls: []routeReplaceCall{
-					{
-						route: &netlink.Route{
-							LinkIndex: 9,
-							Dst:       &net.IPNet{IP: net.ParseIP("192.168.120.1"), Mask: net.CIDRMask(32, 32)},
-							Scope:     netlink.SCOPE_LINK,
-							Table:     107,
-						},
-					},
-					{
-						route: &netlink.Route{
-							LinkIndex: 9,
-							Dst:       &net.IPNet{IP: net.IPv4zero, Mask: net.CIDRMask(0, 32)},
-							Scope:     netlink.SCOPE_UNIVERSE,
-							Gw:        net.ParseIP("192.168.120.1"),
-							Table:     107,
-						},
-					},
-				},
-				procSysSetCalls: []procSysSetCall{
-					{
-						key:   "net/ipv6/conf/vlan.eth.7/accept_ra",
-						value: "0",
-					},
-					{
-						key:   "net/ipv6/conf/vlan.eth.7/accept_redirects",
-						value: "1",
-					},
-					{
-						key:   "net/ipv6/conf/vlan.eth.7/forwarding",
-						value: "0",
-					},
-				},
-			},
-			args: args{
-				vlanID:        vlanID,
-				eniMAC:        eniMac,
-				subnetGW:      "192.168.120.1",
-				parentIfIndex: parentIfIndex,
-				rtTable:       107,
-			},
-			want: vlanLinkPostAddWithIndex9,
-		},
-		{
-			name: "failed to delete old vlan link",
-			fields: fields{
-				linkByNameCalls: []linkByNameCall{
-					{
-						linkName: "vlan.eth.7",
-						link:     buildVlanLink("vlan.eth.7", vlanID, parentIfIndex, eniMac),
-					},
-				},
-				linkDelCalls: []linkDelCall{
-					{
-						link: buildVlanLink("vlan.eth.7", vlanID, parentIfIndex, eniMac),
-						err:  errors.New("some error"),
-					},
-				},
-			},
-			args: args{
-				vlanID:        vlanID,
-				eniMAC:        eniMac,
-				subnetGW:      "192.168.120.1",
-				parentIfIndex: parentIfIndex,
-				rtTable:       107,
-			},
-			wantErr: errors.New("failed to delete old vlan link vlan.eth.7: some error"),
-		},
-		{
-			name: "failed to add vlan link",
-			fields: fields{
-				linkByNameCalls: []linkByNameCall{
-					{
-						linkName: "vlan.eth.7",
-						err:      errors.Errorf("don't exists"),
-					},
-				},
-				linkAddCalls: []linkAddCall{
-					{
-						link: buildVlanLink("vlan.eth.7", vlanID, parentIfIndex, eniMac),
-						err:  errors.New("some error"),
-					},
-				},
-			},
-			args: args{
-				vlanID:        vlanID,
-				eniMAC:        eniMac,
-				subnetGW:      "192.168.120.1",
-				parentIfIndex: parentIfIndex,
-				rtTable:       107,
-			},
-			wantErr: errors.New("failed to add vlan link vlan.eth.7: some error"),
-		},
-		{
-			name: "failed to setUp vlan link",
-			fields: fields{
-				linkByNameCalls: []linkByNameCall{
-					{
-						linkName: "vlan.eth.7",
-						err:      errors.Errorf("don't exists"),
-					},
-				},
-				linkAddCalls: []linkAddCall{
-					{
-						link:      buildVlanLink("vlan.eth.7", vlanID, parentIfIndex, eniMac),
-						linkIndex: 9,
-					},
-				},
-				linkSetupCalls: []linkSetupCall{
-					{
-						link: vlanLinkPostAddWithIndex9,
-						err:  errors.New("some error"),
-					},
-				},
-				procSysSetCalls: []procSysSetCall{
-					{
-						key:   "net/ipv6/conf/vlan.eth.7/accept_ra",
-						value: "0",
-					},
-					{
-						key:   "net/ipv6/conf/vlan.eth.7/accept_redirects",
-						value: "1",
-					},
-					{
-						key:   "net/ipv6/conf/vlan.eth.7/forwarding",
-						value: "0",
-					},
-				},
-			},
-			args: args{
-				vlanID:        vlanID,
-				eniMAC:        eniMac,
-				subnetGW:      "192.168.120.1",
-				parentIfIndex: parentIfIndex,
-				rtTable:       107,
-			},
-			wantErr: errors.New("failed to setUp vlan link vlan.eth.7: some error"),
-		},
-		{
-			name: "failed to replace routes",
-			fields: fields{
-				linkByNameCalls: []linkByNameCall{
-					{
-						linkName: "vlan.eth.7",
-						err:      errors.Errorf("don't exists"),
-					},
-				},
-				linkAddCalls: []linkAddCall{
-					{
-						link:      buildVlanLink("vlan.eth.7", vlanID, parentIfIndex, eniMac),
-						linkIndex: 9,
-					},
-				},
-				linkSetupCalls: []linkSetupCall{
-					{
-						link: vlanLinkPostAddWithIndex9,
-					},
-				},
-				routeReplaceCalls: []routeReplaceCall{
-					{
-						route: &netlink.Route{
-							LinkIndex: 9,
-							Dst:       &net.IPNet{IP: net.ParseIP("192.168.120.1"), Mask: net.CIDRMask(32, 32)},
-							Scope:     netlink.SCOPE_LINK,
-							Table:     107,
-						},
-						err: errors.New("some error"),
-					},
-				},
-				procSysSetCalls: []procSysSetCall{
-					{
-						key:   "net/ipv6/conf/vlan.eth.7/accept_ra",
-						value: "0",
-					},
-					{
-						key:   "net/ipv6/conf/vlan.eth.7/accept_redirects",
-						value: "1",
-					},
-					{
-						key:   "net/ipv6/conf/vlan.eth.7/forwarding",
-						value: "0",
-					},
-				},
-			},
-			args: args{
-				vlanID:        vlanID,
-				eniMAC:        eniMac,
-				subnetGW:      "192.168.120.1",
-				parentIfIndex: parentIfIndex,
-				rtTable:       107,
-			},
-			wantErr: errors.New("failed to replace route entry 192.168.120.1 via 192.168.120.1: some error"),
-		},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			ctrl := gomock.NewController(t)
-			defer ctrl.Finish()
-
-			netLink := mock_netlinkwrapper.NewMockNetLink(ctrl)
-			for _, call := range tt.fields.linkByNameCalls {
-				netLink.EXPECT().LinkByName(call.linkName).Return(call.link, call.err)
-			}
-			for _, call := range tt.fields.linkAddCalls {
-				netLink.EXPECT().LinkAdd(call.link).DoAndReturn(func(link netlink.Link) error {
-					if call.err != nil {
-						return call.err
-					}
-					vlanBeforeAdd := link.(*netlink.Vlan)
-					vlanBeforeAdd.Index = call.linkIndex
-					return nil
-				})
-			}
-			for _, call := range tt.fields.linkDelCalls {
-				netLink.EXPECT().LinkDel(call.link).Return(call.err)
-			}
-			for _, call := range tt.fields.linkSetupCalls {
-				netLink.EXPECT().LinkSetUp(call.link).Return(call.err)
-			}
-			for _, call := range tt.fields.routeReplaceCalls {
-				netLink.EXPECT().RouteReplace(call.route).Return(call.err)
-			}
-			procSys := mock_procsyswrapper.NewMockProcSys(ctrl)
-			for _, call := range tt.fields.procSysSetCalls {
-				procSys.EXPECT().Set(call.key, call.value).Return(call.err)
-			}
-
-			n := &linuxNetwork{
-				netLink: netLink,
-				procSys: procSys,
-			}
-			got, err := n.setupVlan(tt.args.vlanID, tt.args.eniMAC, tt.args.subnetGW, tt.args.parentIfIndex, tt.args.rtTable, testLogger)
-			if tt.wantErr != nil {
-				assert.EqualError(t, err, tt.wantErr.Error())
-			} else {
-				assert.NoError(t, err)
-				assert.Equal(t, tt.want, got)
-			}
-		})
-	}
-}
-
 func Test_linuxNetwork_teardownVlan(t *testing.T) {
 	type linkByNameCall struct {
 		linkName string
@@ -5319,117 +4545,6 @@ func Test_linuxNetwork_setupIIFBasedContainerRouteRules(t *testing.T) {
 	}
 }
 
-func Test_linuxNetwork_teardownIIFBasedContainerRouteRules(t *testing.T) {
-	vlanRuleForTableID101 := netlink.NewRule()
-	vlanRuleForTableID101.Priority = networkutils.VlanRulePriority
-	vlanRuleForTableID101.Table = 101
-	vlanRuleForTableID101.Family = netlink.FAMILY_V4
-
-	vlanIPv6RuleForTableID101 := netlink.NewRule()
-	vlanIPv6RuleForTableID101.Priority = networkutils.VlanRulePriority
-	vlanIPv6RuleForTableID101.Table = 101
-	vlanIPv6RuleForTableID101.Family = netlink.FAMILY_V6
-
-	type ruleDelCall struct {
-		rule *netlink.Rule
-		err  error
-	}
-	type fields struct {
-		ruleDelCalls []ruleDelCall
-	}
-
-	type args struct {
-		rtTable int
-		family  int
-	}
-	tests := []struct {
-		name    string
-		fields  fields
-		args    args
-		wantErr error
-	}{
-		{
-			name: "teardown both rules successfully - IPv4",
-			fields: fields{
-				ruleDelCalls: []ruleDelCall{
-					{
-						rule: vlanRuleForTableID101,
-					},
-					{
-						rule: vlanRuleForTableID101,
-					},
-					{
-						rule: vlanRuleForTableID101,
-						err:  syscall.ENOENT,
-					},
-				},
-			},
-			args: args{
-				rtTable: 101,
-				family:  netlink.FAMILY_V4,
-			},
-		},
-		{
-			name: "teardown both rules successfully - IPv6",
-			fields: fields{
-				ruleDelCalls: []ruleDelCall{
-					{
-						rule: vlanIPv6RuleForTableID101,
-					},
-					{
-						rule: vlanIPv6RuleForTableID101,
-					},
-					{
-						rule: vlanIPv6RuleForTableID101,
-						err:  syscall.ENOENT,
-					},
-				},
-			},
-			args: args{
-				rtTable: 101,
-				family:  netlink.FAMILY_V6,
-			},
-		},
-		{
-			name: "failed to delete rules",
-			fields: fields{
-				ruleDelCalls: []ruleDelCall{
-					{
-						rule: vlanRuleForTableID101,
-						err:  errors.New("some error"),
-					},
-				},
-			},
-			args: args{
-				rtTable: 101,
-				family:  netlink.FAMILY_V4,
-			},
-			wantErr: errors.New("failed to delete IIF based rules, rtTable=101: some error"),
-		},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			ctrl := gomock.NewController(t)
-			defer ctrl.Finish()
-
-			netLink := mock_netlinkwrapper.NewMockNetLink(ctrl)
-			netLink.EXPECT().NewRule().DoAndReturn(func() *netlink.Rule { return netlink.NewRule() }).AnyTimes()
-			for _, call := range tt.fields.ruleDelCalls {
-				netLink.EXPECT().RuleDel(call.rule).Return(call.err)
-			}
-			n := &linuxNetwork{
-				netLink: netLink,
-			}
-			err := n.teardownIIFBasedContainerRouteRules(tt.args.rtTable, tt.args.family, testLogger)
-			if tt.wantErr != nil {
-				assert.EqualError(t, err, tt.wantErr.Error())
-			} else {
-				assert.NoError(t, err)
-			}
-		})
-	}
-}
-
 func Test_buildRoutesForVlan(t *testing.T) {
 	v4Gateway := net.ParseIP("192.168.128.1")
 	v6Gateway := net.ParseIP("fe80::beef")
@@ -5617,4 +4732,392 @@ func isUnicastMAC(mac string) bool {
 		return false
 	}
 	return addr[0]&0x1 == 0 && addr[0]&0x2 == 0x02
+}
+
+func Test_linuxNetwork_teardownIIFBasedContainerRouteRules(t *testing.T) {
+	containerAddr := &net.IPNet{
+		IP:   net.ParseIP("192.168.100.42"),
+		Mask: net.CIDRMask(32, 32),
+	}
+	containerV6Addr := &net.IPNet{
+		IP:   net.ParseIP("2600::2"),
+		Mask: net.CIDRMask(128, 128),
+	}
+
+	t.Run("successfully deletes hostVeth rule and per-pod route - IPv4", func(t *testing.T) {
+		ctrl := gomock.NewController(t)
+		defer ctrl.Finish()
+
+		netLink := mock_netlinkwrapper.NewMockNetLink(ctrl)
+		netLink.EXPECT().NewRule().DoAndReturn(func() *netlink.Rule { return netlink.NewRule() }).AnyTimes()
+		netLink.EXPECT().RuleDel(gomock.Any()).Return(nil)
+		netLink.EXPECT().RuleDel(gomock.Any()).Return(syscall.ENOENT)
+		netLink.EXPECT().RouteDel(gomock.Any()).Return(nil)
+
+		n := &linuxNetwork{netLink: netLink}
+		err := n.teardownIIFBasedContainerRouteRules(VirtualInterfaceMetadata{
+			IPAddress:    containerAddr,
+			HostVethName: "vlanABC123",
+		}, 101, unix.AF_INET, testLogger)
+		assert.NoError(t, err)
+	})
+
+	t.Run("successfully deletes hostVeth rule and per-pod route - IPv6", func(t *testing.T) {
+		ctrl := gomock.NewController(t)
+		defer ctrl.Finish()
+
+		netLink := mock_netlinkwrapper.NewMockNetLink(ctrl)
+		netLink.EXPECT().NewRule().DoAndReturn(func() *netlink.Rule { return netlink.NewRule() }).AnyTimes()
+		netLink.EXPECT().RuleDel(gomock.Any()).Return(nil)
+		netLink.EXPECT().RuleDel(gomock.Any()).Return(syscall.ENOENT)
+		netLink.EXPECT().RouteDel(gomock.Any()).Return(nil)
+
+		n := &linuxNetwork{netLink: netLink}
+		err := n.teardownIIFBasedContainerRouteRules(VirtualInterfaceMetadata{
+			IPAddress:    containerV6Addr,
+			HostVethName: "vlanABC123",
+		}, 101, unix.AF_INET6, testLogger)
+		assert.NoError(t, err)
+	})
+
+	t.Run("fails when rule deletion errors", func(t *testing.T) {
+		ctrl := gomock.NewController(t)
+		defer ctrl.Finish()
+
+		netLink := mock_netlinkwrapper.NewMockNetLink(ctrl)
+		netLink.EXPECT().NewRule().DoAndReturn(func() *netlink.Rule { return netlink.NewRule() }).AnyTimes()
+		netLink.EXPECT().RuleDel(gomock.Any()).Return(errors.New("permission denied"))
+
+		n := &linuxNetwork{netLink: netLink}
+		err := n.teardownIIFBasedContainerRouteRules(VirtualInterfaceMetadata{
+			IPAddress:    containerAddr,
+			HostVethName: "vlanABC123",
+		}, 101, unix.AF_INET, testLogger)
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "failed to delete hostVeth IIF rule")
+	})
+}
+
+func Test_linuxNetwork_teardownVlanIfUnused(t *testing.T) {
+	t.Run("deletes VLAN when no other pods use it", func(t *testing.T) {
+		ctrl := gomock.NewController(t)
+		defer ctrl.Finish()
+
+		netLink := mock_netlinkwrapper.NewMockNetLink(ctrl)
+		netLink.EXPECT().RuleList(unix.AF_INET).Return([]netlink.Rule{}, nil)
+		vlanLink := &netlink.Vlan{LinkAttrs: netlink.LinkAttrs{Name: "vlan.eth.1"}}
+		netLink.EXPECT().LinkByName("vlan.eth.1").Return(vlanLink, nil)
+		netLink.EXPECT().LinkDel(vlanLink).Return(nil)
+
+		n := &linuxNetwork{netLink: netLink}
+		err := n.teardownVlanIfUnused(1, 101, unix.AF_INET, testLogger)
+		assert.NoError(t, err)
+	})
+
+	t.Run("preserves VLAN when other pod has IIF rule", func(t *testing.T) {
+		ctrl := gomock.NewController(t)
+		defer ctrl.Finish()
+
+		netLink := mock_netlinkwrapper.NewMockNetLink(ctrl)
+		netLink.EXPECT().RuleList(unix.AF_INET).Return([]netlink.Rule{
+			{IifName: "vlan.eth.1", Priority: networkutils.VlanRulePriority, Table: 101},
+			{IifName: "vlanOTHERPOD123", Priority: networkutils.VlanRulePriority, Table: 101},
+		}, nil)
+
+		n := &linuxNetwork{netLink: netLink}
+		err := n.teardownVlanIfUnused(1, 101, unix.AF_INET, testLogger)
+		assert.NoError(t, err)
+	})
+
+	t.Run("deletes VLAN when only the vlan IIF rule remains", func(t *testing.T) {
+		ctrl := gomock.NewController(t)
+		defer ctrl.Finish()
+
+		netLink := mock_netlinkwrapper.NewMockNetLink(ctrl)
+		netLink.EXPECT().RuleList(unix.AF_INET).Return([]netlink.Rule{
+			{IifName: "vlan.eth.1", Priority: networkutils.VlanRulePriority, Table: 101},
+		}, nil)
+		vlanLink := &netlink.Vlan{LinkAttrs: netlink.LinkAttrs{Name: "vlan.eth.1"}}
+		netLink.EXPECT().LinkByName("vlan.eth.1").Return(vlanLink, nil)
+		netLink.EXPECT().LinkDel(vlanLink).Return(nil)
+
+		n := &linuxNetwork{netLink: netLink}
+		err := n.teardownVlanIfUnused(1, 101, unix.AF_INET, testLogger)
+		assert.NoError(t, err)
+	})
+}
+
+func Test_linuxNetwork_TeardownBranchENIPodNetwork(t *testing.T) {
+	containerAddr := &net.IPNet{
+		IP:   net.ParseIP("172.31.108.80"),
+		Mask: net.CIDRMask(32, 32),
+	}
+	containerV6Addr := &net.IPNet{
+		IP:   net.ParseIP("2600::2"),
+		Mask: net.CIDRMask(128, 128),
+	}
+
+	t.Run("standard SGPP (1:1) - single pod on VLAN, full cleanup", func(t *testing.T) {
+		ctrl := gomock.NewController(t)
+		defer ctrl.Finish()
+
+		netLink := mock_netlinkwrapper.NewMockNetLink(ctrl)
+		netLink.EXPECT().NewRule().DoAndReturn(func() *netlink.Rule { return netlink.NewRule() }).AnyTimes()
+		netLink.EXPECT().RuleDel(gomock.Any()).Return(syscall.ENOENT).AnyTimes()
+		netLink.EXPECT().RouteDel(gomock.Any()).Return(nil).AnyTimes()
+		// teardownVlanIfUnused: no other pods → delete VLAN
+		netLink.EXPECT().RuleList(unix.AF_INET).Return([]netlink.Rule{}, nil)
+		vlanLink := &netlink.Vlan{LinkAttrs: netlink.LinkAttrs{Name: "vlan.eth.7"}}
+		netLink.EXPECT().LinkByName("vlan.eth.7").Return(vlanLink, nil)
+		netLink.EXPECT().LinkDel(vlanLink).Return(nil)
+
+		n := &linuxNetwork{netLink: netLink}
+		err := n.TeardownBranchENIPodNetwork(VirtualInterfaceMetadata{
+			IPAddress:    containerAddr,
+			HostVethName: "vlan8ea2c11fe35",
+		}, 7, sgpp.EnforcingModeStrict, testLogger)
+		assert.NoError(t, err)
+	})
+
+	t.Run("standard SGPP (1:1) - IPv6 pod, full cleanup", func(t *testing.T) {
+		ctrl := gomock.NewController(t)
+		defer ctrl.Finish()
+
+		netLink := mock_netlinkwrapper.NewMockNetLink(ctrl)
+		netLink.EXPECT().NewRule().DoAndReturn(func() *netlink.Rule { return netlink.NewRule() }).AnyTimes()
+		netLink.EXPECT().RuleDel(gomock.Any()).Return(syscall.ENOENT).AnyTimes()
+		netLink.EXPECT().RouteDel(gomock.Any()).Return(nil).AnyTimes()
+		netLink.EXPECT().RuleList(unix.AF_INET6).Return([]netlink.Rule{}, nil)
+		vlanLink := &netlink.Vlan{LinkAttrs: netlink.LinkAttrs{Name: "vlan.eth.7"}}
+		netLink.EXPECT().LinkByName("vlan.eth.7").Return(vlanLink, nil)
+		netLink.EXPECT().LinkDel(vlanLink).Return(nil)
+
+		n := &linuxNetwork{netLink: netLink}
+		err := n.TeardownBranchENIPodNetwork(VirtualInterfaceMetadata{
+			IPAddress:    containerV6Addr,
+			HostVethName: "vlan8ea2c11fe35",
+		}, 7, sgpp.EnforcingModeStrict, testLogger)
+		assert.NoError(t, err)
+	})
+
+	t.Run("standard SGPP (1:1) - standard enforcing mode, full cleanup", func(t *testing.T) {
+		ctrl := gomock.NewController(t)
+		defer ctrl.Finish()
+
+		netLink := mock_netlinkwrapper.NewMockNetLink(ctrl)
+		netLink.EXPECT().NewRule().DoAndReturn(func() *netlink.Rule { return netlink.NewRule() }).AnyTimes()
+		netLink.EXPECT().RuleDel(gomock.Any()).Return(syscall.ENOENT).AnyTimes()
+		netLink.EXPECT().RouteDel(gomock.Any()).Return(nil).AnyTimes()
+		netLink.EXPECT().RuleList(unix.AF_INET).Return([]netlink.Rule{}, nil)
+		vlanLink := &netlink.Vlan{LinkAttrs: netlink.LinkAttrs{Name: "vlan.eth.7"}}
+		netLink.EXPECT().LinkByName("vlan.eth.7").Return(vlanLink, nil)
+		netLink.EXPECT().LinkDel(vlanLink).Return(nil)
+
+		n := &linuxNetwork{netLink: netLink}
+		err := n.TeardownBranchENIPodNetwork(VirtualInterfaceMetadata{
+			IPAddress:    containerAddr,
+			HostVethName: "eni8ea2c11fe35",
+		}, 7, sgpp.EnforcingModeStandard, testLogger)
+		assert.NoError(t, err)
+	})
+
+	t.Run("shared ENI - last pod, cleans up VLAN", func(t *testing.T) {
+		ctrl := gomock.NewController(t)
+		defer ctrl.Finish()
+
+		netLink := mock_netlinkwrapper.NewMockNetLink(ctrl)
+		netLink.EXPECT().NewRule().DoAndReturn(func() *netlink.Rule { return netlink.NewRule() }).AnyTimes()
+		netLink.EXPECT().RuleDel(gomock.Any()).Return(syscall.ENOENT).AnyTimes()
+		netLink.EXPECT().RouteDel(gomock.Any()).Return(nil).AnyTimes()
+		netLink.EXPECT().RuleList(unix.AF_INET).Return([]netlink.Rule{}, nil)
+		vlanLink := &netlink.Vlan{LinkAttrs: netlink.LinkAttrs{Name: "vlan.eth.1"}}
+		netLink.EXPECT().LinkByName("vlan.eth.1").Return(vlanLink, nil)
+		netLink.EXPECT().LinkDel(vlanLink).Return(nil)
+
+		n := &linuxNetwork{netLink: netLink}
+		err := n.TeardownBranchENIPodNetwork(VirtualInterfaceMetadata{
+			IPAddress:    containerAddr,
+			HostVethName: "vlanABC123",
+		}, 1, sgpp.EnforcingModeStrict, testLogger)
+		assert.NoError(t, err)
+	})
+
+	t.Run("shared ENI - other pods present, preserves VLAN", func(t *testing.T) {
+		ctrl := gomock.NewController(t)
+		defer ctrl.Finish()
+
+		netLink := mock_netlinkwrapper.NewMockNetLink(ctrl)
+		netLink.EXPECT().NewRule().DoAndReturn(func() *netlink.Rule { return netlink.NewRule() }).AnyTimes()
+		netLink.EXPECT().RuleDel(gomock.Any()).Return(syscall.ENOENT).AnyTimes()
+		netLink.EXPECT().RouteDel(gomock.Any()).Return(nil).AnyTimes()
+		netLink.EXPECT().RuleList(unix.AF_INET).Return([]netlink.Rule{
+			{IifName: "vlan.eth.1", Priority: networkutils.VlanRulePriority, Table: 101},
+			{IifName: "vlanOTHERPOD", Priority: networkutils.VlanRulePriority, Table: 101},
+		}, nil)
+
+		n := &linuxNetwork{netLink: netLink}
+		err := n.TeardownBranchENIPodNetwork(VirtualInterfaceMetadata{
+			IPAddress:    containerAddr,
+			HostVethName: "vlanABC123",
+		}, 1, sgpp.EnforcingModeStrict, testLogger)
+		assert.NoError(t, err)
+	})
+
+	t.Run("error - failed to delete hostVeth IIF rule", func(t *testing.T) {
+		ctrl := gomock.NewController(t)
+		defer ctrl.Finish()
+
+		netLink := mock_netlinkwrapper.NewMockNetLink(ctrl)
+		netLink.EXPECT().NewRule().DoAndReturn(func() *netlink.Rule { return netlink.NewRule() }).AnyTimes()
+		netLink.EXPECT().RuleDel(gomock.Any()).Return(errors.New("some error"))
+
+		n := &linuxNetwork{netLink: netLink}
+		err := n.TeardownBranchENIPodNetwork(VirtualInterfaceMetadata{
+			IPAddress:    containerAddr,
+			HostVethName: "vlanABC123",
+		}, 1, sgpp.EnforcingModeStrict, testLogger)
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "unable to teardown IIF based container routes and rules")
+	})
+
+	t.Run("error - failed to delete toContainer rule", func(t *testing.T) {
+		ctrl := gomock.NewController(t)
+		defer ctrl.Finish()
+
+		netLink := mock_netlinkwrapper.NewMockNetLink(ctrl)
+		netLink.EXPECT().NewRule().DoAndReturn(func() *netlink.Rule { return netlink.NewRule() }).AnyTimes()
+		// teardownIIFBasedContainerRouteRules succeeds
+		netLink.EXPECT().RuleDel(gomock.Any()).Return(syscall.ENOENT)
+		netLink.EXPECT().RouteDel(gomock.Any()).Return(nil)
+		// teardownIPBasedContainerRouteRules: toContainerRule deletion fails
+		netLink.EXPECT().RuleDel(gomock.Any()).Return(errors.New("some error"))
+
+		n := &linuxNetwork{netLink: netLink}
+		err := n.TeardownBranchENIPodNetwork(VirtualInterfaceMetadata{
+			IPAddress:    containerAddr,
+			HostVethName: "vlanABC123",
+		}, 1, sgpp.EnforcingModeStandard, testLogger)
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "unable to teardown IP based container routes and rules")
+	})
+}
+
+func Test_linuxNetwork_setupVlan(t *testing.T) {
+	t.Run("reuses existing VLAN with matching config", func(t *testing.T) {
+		ctrl := gomock.NewController(t)
+		defer ctrl.Finish()
+
+		mac, _ := net.ParseMAC("02:b8:8b:9d:e4:87")
+		existingVlan := &netlink.Vlan{
+			VlanId: 1,
+			LinkAttrs: netlink.LinkAttrs{
+				Name:         "vlan.eth.1",
+				Index:        42,
+				ParentIndex:  5,
+				HardwareAddr: mac,
+			},
+		}
+
+		netLink := mock_netlinkwrapper.NewMockNetLink(ctrl)
+		netLink.EXPECT().LinkByName("vlan.eth.1").Return(existingVlan, nil)
+		netLink.EXPECT().LinkSetUp(existingVlan).Return(nil)
+		netLink.EXPECT().RouteReplace(gomock.Any()).Return(nil).Times(2)
+
+		n := &linuxNetwork{netLink: netLink}
+		got, err := n.setupVlan(1, "02:b8:8b:9d:e4:87", "172.31.96.1", 5, 101, testLogger)
+		assert.NoError(t, err)
+		assert.Equal(t, existingVlan, got)
+	})
+
+	t.Run("creates new VLAN when none exists", func(t *testing.T) {
+		ctrl := gomock.NewController(t)
+		defer ctrl.Finish()
+
+		netLink := mock_netlinkwrapper.NewMockNetLink(ctrl)
+		netLink.EXPECT().LinkByName("vlan.eth.1").Return(nil, errors.New("not found"))
+		netLink.EXPECT().LinkAdd(gomock.Any()).DoAndReturn(func(link netlink.Link) error {
+			link.(*netlink.Vlan).Index = 11
+			return nil
+		})
+		netLink.EXPECT().LinkSetUp(gomock.Any()).Return(nil)
+		netLink.EXPECT().RouteReplace(gomock.Any()).Return(nil).Times(2)
+
+		procSys := mock_procsyswrapper.NewMockProcSys(ctrl)
+		procSys.EXPECT().Set(gomock.Any(), gomock.Any()).Return(nil).AnyTimes()
+
+		n := &linuxNetwork{netLink: netLink, procSys: procSys}
+		got, err := n.setupVlan(1, "02:b8:8b:9d:e4:87", "172.31.96.1", 5, 101, testLogger)
+		assert.NoError(t, err)
+		assert.Equal(t, 11, got.Attrs().Index)
+	})
+
+	t.Run("handles EEXIST race - reuses concurrently created VLAN", func(t *testing.T) {
+		ctrl := gomock.NewController(t)
+		defer ctrl.Finish()
+
+		existingVlan := &netlink.Vlan{
+			VlanId:    1,
+			LinkAttrs: netlink.LinkAttrs{Name: "vlan.eth.1", Index: 42},
+		}
+
+		netLink := mock_netlinkwrapper.NewMockNetLink(ctrl)
+		netLink.EXPECT().LinkByName("vlan.eth.1").Return(nil, errors.New("not found"))
+		netLink.EXPECT().LinkAdd(gomock.Any()).Return(syscall.EEXIST)
+		netLink.EXPECT().LinkByName("vlan.eth.1").Return(existingVlan, nil)
+		netLink.EXPECT().LinkSetUp(existingVlan).Return(nil)
+		netLink.EXPECT().RouteReplace(gomock.Any()).Return(nil).Times(2)
+
+		n := &linuxNetwork{netLink: netLink}
+		got, err := n.setupVlan(1, "02:b8:8b:9d:e4:87", "172.31.96.1", 5, 101, testLogger)
+		assert.NoError(t, err)
+		assert.Equal(t, existingVlan, got)
+	})
+
+	t.Run("deletes and recreates VLAN when config mismatches (trunk ENI changed)", func(t *testing.T) {
+		ctrl := gomock.NewController(t)
+		defer ctrl.Finish()
+
+		wrongMAC, _ := net.ParseMAC("aa:bb:cc:dd:ee:ff")
+		staleVlan := &netlink.Vlan{
+			VlanId: 1,
+			LinkAttrs: netlink.LinkAttrs{
+				Name:         "vlan.eth.1",
+				Index:        42,
+				ParentIndex:  5,
+				HardwareAddr: wrongMAC,
+			},
+		}
+
+		netLink := mock_netlinkwrapper.NewMockNetLink(ctrl)
+		netLink.EXPECT().LinkByName("vlan.eth.1").Return(staleVlan, nil)
+		netLink.EXPECT().LinkDel(staleVlan).Return(nil)
+		netLink.EXPECT().LinkAdd(gomock.Any()).DoAndReturn(func(link netlink.Link) error {
+			link.(*netlink.Vlan).Index = 99
+			return nil
+		})
+		netLink.EXPECT().LinkSetUp(gomock.Any()).Return(nil)
+		netLink.EXPECT().RouteReplace(gomock.Any()).Return(nil).Times(2)
+
+		procSys := mock_procsyswrapper.NewMockProcSys(ctrl)
+		procSys.EXPECT().Set(gomock.Any(), gomock.Any()).Return(nil).AnyTimes()
+
+		n := &linuxNetwork{netLink: netLink, procSys: procSys}
+		got, err := n.setupVlan(1, "02:b8:8b:9d:e4:87", "172.31.96.1", 5, 101, testLogger)
+		assert.NoError(t, err)
+		assert.Equal(t, 99, got.Attrs().Index)
+	})
+
+	t.Run("fails when LinkAdd errors with non-EEXIST", func(t *testing.T) {
+		ctrl := gomock.NewController(t)
+		defer ctrl.Finish()
+
+		netLink := mock_netlinkwrapper.NewMockNetLink(ctrl)
+		netLink.EXPECT().LinkByName("vlan.eth.1").Return(nil, errors.New("not found"))
+		netLink.EXPECT().LinkAdd(gomock.Any()).Return(errors.New("some error"))
+
+		n := &linuxNetwork{netLink: netLink}
+		_, err := n.setupVlan(1, "02:b8:8b:9d:e4:87", "172.31.96.1", 5, 101, testLogger)
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "failed to add vlan link")
+	})
 }

@@ -462,14 +462,20 @@ func del(args *skel.CmdArgs, cniTypes typeswrapper.CNITYPES, grpcClient grpcwrap
 
 	var vethMetadata []driver.VirtualInterfaceMetadata
 
-	for _, ipAllocationMetadata := range r.IPAllocationMetadata {
+	for index, ipAllocationMetadata := range r.IPAllocationMetadata {
 		addr := getIPAddressFromIpAllocationMetadata(ipAllocationMetadata)
 
 		if addr != nil {
+			var hostVethName string
+			if r.PodVlanId != 0 {
+				hostVethNamePrefix := sgpp.BuildHostVethNamePrefix(conf.VethPrefix, conf.PodSGEnforcingMode)
+				hostVethName = networkutils.GeneratePodHostVethName(hostVethNamePrefix, string(k8sArgs.K8S_POD_NAMESPACE), string(k8sArgs.K8S_POD_NAME), index)
+			}
 			vethMetadata = append(vethMetadata, driver.VirtualInterfaceMetadata{
 				IPAddress:    addr,
 				DeviceNumber: getDeviceNumberFromIpAllocationMetadata(ipAllocationMetadata),
 				RouteTable:   getRouteTableIdFromIpAllocationMetadata(ipAllocationMetadata),
+				HostVethName: hostVethName,
 			})
 		}
 	}
@@ -578,8 +584,12 @@ func tryDelWithPrevResult(driverClient driver.NetworkAPIs, conf *NetConf, k8sArg
 		return false, err
 	}
 
+	hostVethNamePrefix := sgpp.BuildHostVethNamePrefix(conf.VethPrefix, conf.PodSGEnforcingMode)
+	hostVethName := networkutils.GeneratePodHostVethName(hostVethNamePrefix, string(k8sArgs.K8S_POD_NAMESPACE), string(k8sArgs.K8S_POD_NAME), 0)
+
 	vethMetadata := driver.VirtualInterfaceMetadata{
-		IPAddress: &containerIP,
+		IPAddress:    &containerIP,
+		HostVethName: hostVethName,
 	}
 
 	if err := driverClient.TeardownBranchENIPodNetwork(vethMetadata, podVlanID, conf.PodSGEnforcingMode, log); err != nil {

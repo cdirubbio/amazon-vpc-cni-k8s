@@ -1232,11 +1232,7 @@ func Test_tryDelWithPrevResult(t *testing.T) {
 
 			driverClient := mock_driver.NewMockNetworkAPIs(ctrl)
 			for _, call := range tt.fields.teardownBranchENIPodNetworkCalls {
-				vethMetadata := driver.VirtualInterfaceMetadata{
-					IPAddress: call.containerAddr,
-				}
-
-				driverClient.EXPECT().TeardownBranchENIPodNetwork(vethMetadata, call.vlanID, call.podSGEnforcingMode, gomock.Any()).Return(call.err)
+				driverClient.EXPECT().TeardownBranchENIPodNetwork(gomock.Any(), call.vlanID, call.podSGEnforcingMode, gomock.Any()).Return(call.err)
 			}
 
 			got, err := tryDelWithPrevResult(driverClient, tt.args.conf, tt.args.k8sArgs, tt.args.contVethName, "/proc/1/ns", testLogger)
